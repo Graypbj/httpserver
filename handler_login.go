@@ -6,16 +6,18 @@ import (
 	"time"
 
 	"github.com/Graypbj/httpserver/internal/auth"
+	"github.com/Graypbj/httpserver/internal/database"
 )
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		ExpiresInSeconds *int   `json:"expires_in_seconds,omitempty"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	type response struct {
 		User
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -24,16 +26,6 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
-	}
-
-	expiresInSeconds := 3600 // Default: 1 hour
-	if params.ExpiresInSeconds != nil {
-		clientExpires := *params.ExpiresInSeconds
-		if clientExpires > 0 {
-			if clientExpires < 3600 {
-				expiresInSeconds = clientExpires
-			}
-		}
 	}
 
 	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
@@ -48,9 +40,27 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(expiresInSeconds)*time.Second)
+	expiresInSeconds := 3600 // Default: 1 hour
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(expiresInSeconds)*time.Second)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error generating token", err)
+		return
+	}
+
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error generating refresh token", err)
+		return
+	}
+
+	dbRefreshToken, err := cfg.db.CreateToken(r.Context(), database.CreateTokenParams{
+		Token:     refreshToken,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(60 * 24 * time.Hour),
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error generating refresh token db", err)
+		return
 	}
 
 	respondWithJSON(w, http.StatusOK, response{
@@ -59,7 +69,8 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
-			Token:     token,
 		},
+		Token:        token,
+		RefreshToken: dbRefreshToken.Token,
 	})
 }

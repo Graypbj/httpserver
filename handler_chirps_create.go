@@ -30,7 +30,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get bearer token", err)
 		return
 	}
-	userID, err := auth.ValidateJWT(tokenString, cfg.secret)
+	userID, err := auth.ValidateJWT(tokenString, cfg.jwtSecret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
 		return
